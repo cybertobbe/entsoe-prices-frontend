@@ -9,17 +9,40 @@
 
     <div v-else-if="summary" class="content">
 
+      <!-- Moms toggle -->
+      <div class="vat-toggle">
+        <button :class="{ active: !includeVat }" @click="includeVat = false">Exkl moms</button>
+        <button :class="{ active: includeVat }" @click="includeVat = true">Inkl moms (25%)</button>
+      </div>
+
       <!-- Aktuellt pris -->
       <div class="current-price-section">
         <div class="current-price-card">
-          <span class="label">Just nu ({{ formatTime(currentHour) }})</span>
-          <span class="value" :class="getCurrentPriceClass()">{{ formatPrice(currentPrice) }}</span>
-          <span class="unit">SEK/kWh inkl moms</span>
-          <span class="comparison" v-if="avgPrice">
-            <span v-if="currentPrice < avgPrice * 0.9">🟢 Under snitt</span>
-            <span v-else-if="currentPrice > avgPrice * 1.1">🔴 Över snitt</span>
-            <span v-else>🟡 Nära snitt</span>
-          </span>
+          <span class="label">Just nu ({{ currentHour }}:00)</span>
+          <span class="value" :class="getCurrentPriceClass()">{{ formatPrice(displayCurrentPrice) }}</span>
+          <span class="unit">SEK/kWh {{ includeVat ? 'inkl moms' : 'exkl moms' }}</span>
+          <div class="comparison" v-if="displayCurrentPrice && displayAvgPrice">
+            <span v-if="displayCurrentPrice < displayAvgPrice * 0.9" class="under">
+              🟢 {{ formatPercent(displayCurrentPrice, displayAvgPrice) }} under snittet
+            </span>
+            <span v-else-if="displayCurrentPrice > displayAvgPrice * 1.1" class="over">
+              🔴 {{ formatPercent(displayCurrentPrice, displayAvgPrice) }} över snittet
+            </span>
+            <span v-else class="normal">
+              🟡 Nära snittet
+            </span>
+          </div>
+          <div class="forecast-comparison" v-if="displayCurrentPrice && displayForecastPrice">
+            <span v-if="displayCurrentPrice < displayForecastPrice * 0.95" class="under">
+              📉 {{ formatDiff(displayForecastPrice - displayCurrentPrice) }} lägre än igår
+            </span>
+            <span v-else-if="displayCurrentPrice > displayForecastPrice * 1.05" class="over">
+              📈 {{ formatDiff(displayCurrentPrice - displayForecastPrice) }} högre än igår
+            </span>
+            <span v-else class="normal">
+              📊 Samma som igår
+            </span>
+          </div>
         </div>
       </div>
 
@@ -54,26 +77,25 @@
         </button>
       </div>
 
-      <!-- Valt datum -->
       <p class="selected-date">{{ getSelectedDateLabel() }}</p>
 
       <div class="summary-cards">
         <div class="card avg">
           <span class="label">Snitt</span>
-          <span class="value">{{ formatPrice(currentSummary?.averageSekKwhInclVat) }}</span>
+          <span class="value">{{ formatPrice(displaySummaryAvg) }}</span>
           <span class="unit">SEK/kWh</span>
           <span class="compare" v-if="getPreviousSummary()">
-            {{ getCompareText(currentSummary?.averageSekKwhInclVat, getPreviousSummary()?.averageSekKwhInclVat) }}
+            {{ getCompareText(displaySummaryAvg, getDisplayPreviousAvg()) }}
           </span>
         </div>
         <div class="card low">
           <span class="label">Lägsta</span>
-          <span class="value">{{ formatPrice(currentSummary?.minSekKwh * 1.25) }}</span>
+          <span class="value">{{ formatPrice(displaySummaryMin) }}</span>
           <span class="unit">SEK/kWh</span>
         </div>
         <div class="card high">
           <span class="label">Högsta</span>
-          <span class="value">{{ formatPrice(currentSummary?.maxSekKwh * 1.25) }}</span>
+          <span class="value">{{ formatPrice(displaySummaryMax) }}</span>
           <span class="unit">SEK/kWh</span>
         </div>
       </div>
@@ -84,7 +106,7 @@
           <ul>
             <li v-for="hour in currentSummary?.cheapestHours" :key="hour.timestamp">
               <span class="time">{{ formatTime(hour.timestamp) }}</span>
-              <span class="price">{{ formatPrice(hour.priceSekKwhInclVat) }} SEK/kWh</span>
+              <span class="price">{{ formatPrice(getDisplayPrice(hour)) }} SEK/kWh</span>
             </li>
           </ul>
         </div>
@@ -93,29 +115,28 @@
           <ul>
             <li v-for="hour in currentSummary?.expensiveHours" :key="hour.timestamp">
               <span class="time">{{ formatTime(hour.timestamp) }}</span>
-              <span class="price">{{ formatPrice(hour.priceSekKwhInclVat) }} SEK/kWh</span>
+              <span class="price">{{ formatPrice(getDisplayPrice(hour)) }} SEK/kWh</span>
             </li>
           </ul>
         </div>
       </div>
 
       <div class="chart-section">
-        <h3>Pris per timme</h3>
+        <h3>Pris per timme (00-23)</h3>
         <div class="chart">
           <div
               v-for="(price, index) in currentHourlyPrices"
               :key="index"
               class="bar"
-              :style="{ height: getBarHeight(price.priceSekKwhInclVat) + '%' }"
-              :class="getBarClass(price.priceSekKwhInclVat, price.timestamp)"
-              :title="formatTime(price.timestamp) + ': ' + formatPrice(price.priceSekKwhInclVat) + ' SEK/kWh'"
+              :style="{ height: getBarHeight(getDisplayHourlyPrice(price)) + '%' }"
+              :class="getBarClass(getDisplayHourlyPrice(price), price.hour)"
+              :title="price.hour + ':00 - ' + formatPrice(getDisplayHourlyPrice(price)) + ' SEK/kWh'"
           >
-            <span class="bar-label" v-if="index % 4 === 0">{{ formatHour(price.timestamp) }}</span>
+            <span class="bar-label">{{ price.hour }}</span>
           </div>
         </div>
       </div>
 
-      <!-- Jämförelse över dagar -->
       <div class="comparison-section" v-if="hasMultipleDays">
         <h3>📊 Jämförelse</h3>
         <div class="comparison-table">
@@ -127,27 +148,27 @@
           </div>
           <div class="comp-row" v-if="dayBeforeYesterdaySummary">
             <span class="comp-cell">I förrgår</span>
-            <span class="comp-cell">{{ formatPrice(dayBeforeYesterdaySummary.averageSekKwhInclVat) }}</span>
-            <span class="comp-cell low">{{ formatPrice(dayBeforeYesterdaySummary.minSekKwh * 1.25) }}</span>
-            <span class="comp-cell high">{{ formatPrice(dayBeforeYesterdaySummary.maxSekKwh * 1.25) }}</span>
+            <span class="comp-cell">{{ formatPrice(getDisplayAvg(dayBeforeYesterdaySummary)) }}</span>
+            <span class="comp-cell low">{{ formatPrice(getDisplayMin(dayBeforeYesterdaySummary)) }}</span>
+            <span class="comp-cell high">{{ formatPrice(getDisplayMax(dayBeforeYesterdaySummary)) }}</span>
           </div>
           <div class="comp-row" v-if="yesterdaySummary">
             <span class="comp-cell">Igår</span>
-            <span class="comp-cell">{{ formatPrice(yesterdaySummary.averageSekKwhInclVat) }}</span>
-            <span class="comp-cell low">{{ formatPrice(yesterdaySummary.minSekKwh * 1.25) }}</span>
-            <span class="comp-cell high">{{ formatPrice(yesterdaySummary.maxSekKwh * 1.25) }}</span>
+            <span class="comp-cell">{{ formatPrice(getDisplayAvg(yesterdaySummary)) }}</span>
+            <span class="comp-cell low">{{ formatPrice(getDisplayMin(yesterdaySummary)) }}</span>
+            <span class="comp-cell high">{{ formatPrice(getDisplayMax(yesterdaySummary)) }}</span>
           </div>
           <div class="comp-row current" v-if="summary">
             <span class="comp-cell">Idag</span>
-            <span class="comp-cell">{{ formatPrice(summary.averageSekKwhInclVat) }}</span>
-            <span class="comp-cell low">{{ formatPrice(summary.minSekKwh * 1.25) }}</span>
-            <span class="comp-cell high">{{ formatPrice(summary.maxSekKwh * 1.25) }}</span>
+            <span class="comp-cell">{{ formatPrice(getDisplayAvg(summary)) }}</span>
+            <span class="comp-cell low">{{ formatPrice(getDisplayMin(summary)) }}</span>
+            <span class="comp-cell high">{{ formatPrice(getDisplayMax(summary)) }}</span>
           </div>
           <div class="comp-row" v-if="tomorrowSummary">
             <span class="comp-cell">Imorgon</span>
-            <span class="comp-cell">{{ formatPrice(tomorrowSummary.averageSekKwhInclVat) }}</span>
-            <span class="comp-cell low">{{ formatPrice(tomorrowSummary.minSekKwh * 1.25) }}</span>
-            <span class="comp-cell high">{{ formatPrice(tomorrowSummary.maxSekKwh * 1.25) }}</span>
+            <span class="comp-cell">{{ formatPrice(getDisplayAvg(tomorrowSummary)) }}</span>
+            <span class="comp-cell low">{{ formatPrice(getDisplayMin(tomorrowSummary)) }}</span>
+            <span class="comp-cell high">{{ formatPrice(getDisplayMax(tomorrowSummary)) }}</span>
           </div>
         </div>
       </div>
@@ -173,7 +194,10 @@ const yesterdayPrices = ref([])
 const dayBeforeYesterdayPrices = ref([])
 const exchangeRate = ref(null)
 const selectedDay = ref('today')
+const includeVat = ref(false)
 const today = new Date()
+
+const VAT_MULTIPLIER = 1.25
 
 const currentSummary = computed(() => {
   switch (selectedDay.value) {
@@ -198,33 +222,127 @@ const hasYesterdayPrices = computed(() => yesterdayPrices.value?.length > 0)
 const hasDayBeforeYesterdayPrices = computed(() => dayBeforeYesterdayPrices.value?.length > 0)
 const hasMultipleDays = computed(() => yesterdaySummary.value || tomorrowSummary.value)
 
-const currentHour = computed(() => new Date().toISOString())
+const currentHour = computed(() => {
+  return new Date().getHours().toString().padStart(2, '0')
+})
 
 const currentPrice = computed(() => {
   const now = new Date()
+  const currentH = now.getHours()
+
+  // Hitta priset för aktuell timme
   const price = prices.value.find(p => {
-    const priceTime = new Date(p.timestamp)
-    return priceTime.getHours() === now.getHours() && priceTime.getDate() === now.getDate()
+    const priceHour = parseInt(p.timestamp.substring(11, 13))
+    return priceHour === currentH
   })
-  return price?.priceSekKwhInclVat || null
+  return price || null
 })
 
-const avgPrice = computed(() => summary.value?.averageSekKwhInclVat || 0)
+const displayCurrentPrice = computed(() => {
+  if (!currentPrice.value) return null
+  return includeVat.value ? currentPrice.value.priceSekKwhInclVat : currentPrice.value.priceSekKwh
+})
+
+const avgPrice = computed(() => summary.value?.averageSekKwh || 0)
+
+const displayAvgPrice = computed(() => {
+  return includeVat.value ? avgPrice.value * VAT_MULTIPLIER : avgPrice.value
+})
+
+const forecastPrice = computed(() => {
+  if (!yesterdayPrices.value?.length) return null
+  const currentH = new Date().getHours()
+  const price = yesterdayPrices.value.find(p => {
+    const priceHour = parseInt(p.timestamp.substring(11, 13))
+    return priceHour === currentH
+  })
+  return price || null
+})
+
+const displayForecastPrice = computed(() => {
+  if (!forecastPrice.value) return null
+  return includeVat.value ? forecastPrice.value.priceSekKwhInclVat : forecastPrice.value.priceSekKwh
+})
+
+const displaySummaryAvg = computed(() => {
+  if (!currentSummary.value) return null
+  return includeVat.value ? currentSummary.value.averageSekKwhInclVat : currentSummary.value.averageSekKwh
+})
+
+const displaySummaryMin = computed(() => {
+  if (!currentSummary.value) return null
+  const min = currentSummary.value.minSekKwh
+  return includeVat.value ? min * VAT_MULTIPLIER : min
+})
+
+const displaySummaryMax = computed(() => {
+  if (!currentSummary.value) return null
+  const max = currentSummary.value.maxSekKwh
+  return includeVat.value ? max * VAT_MULTIPLIER : max
+})
 
 const currentHourlyPrices = computed(() => {
   const priceList = currentPrices.value
+  const hourlyMap = new Map()
+
+  // Gruppera per timme
+  priceList.forEach(p => {
+    const hour = parseInt(p.timestamp.substring(11, 13))
+    if (!hourlyMap.has(hour)) {
+      hourlyMap.set(hour, [])
+    }
+    hourlyMap.get(hour).push(p)
+  })
+
+  // Beräkna medelvärde per timme
   const hourly = []
-  for (let i = 0; i < priceList.length; i += 4) {
-    const slice = priceList.slice(i, i + 4)
-    if (slice.length > 0) {
-      const avg = slice.reduce((sum, p) => sum + p.priceSekKwhInclVat, 0) / slice.length
-      hourly.push({ timestamp: slice[0].timestamp, priceSekKwhInclVat: avg })
+  for (let h = 0; h < 24; h++) {
+    const hourPrices = hourlyMap.get(h)
+    if (hourPrices && hourPrices.length > 0) {
+      const avgSek = hourPrices.reduce((sum, p) => sum + p.priceSekKwh, 0) / hourPrices.length
+      const avgSekVat = hourPrices.reduce((sum, p) => sum + p.priceSekKwhInclVat, 0) / hourPrices.length
+      hourly.push({
+        hour: h.toString().padStart(2, '0'),
+        priceSekKwh: avgSek,
+        priceSekKwhInclVat: avgSekVat
+      })
     }
   }
   return hourly
 })
 
-const maxPrice = computed(() => Math.max(...currentHourlyPrices.value.map(p => p.priceSekKwhInclVat), 0))
+const maxPrice = computed(() => {
+  const priceValues = currentHourlyPrices.value.map(p => getDisplayHourlyPrice(p))
+  return Math.max(...priceValues, 0)
+})
+
+function getDisplayPrice(priceObj) {
+  return includeVat.value ? priceObj.priceSekKwhInclVat : priceObj.priceSekKwh
+}
+
+function getDisplayHourlyPrice(priceObj) {
+  return includeVat.value ? priceObj.priceSekKwhInclVat : priceObj.priceSekKwh
+}
+
+function getDisplayAvg(summaryObj) {
+  if (!summaryObj) return null
+  return includeVat.value ? summaryObj.averageSekKwhInclVat : summaryObj.averageSekKwh
+}
+
+function getDisplayMin(summaryObj) {
+  if (!summaryObj) return null
+  return includeVat.value ? summaryObj.minSekKwh * VAT_MULTIPLIER : summaryObj.minSekKwh
+}
+
+function getDisplayMax(summaryObj) {
+  if (!summaryObj) return null
+  return includeVat.value ? summaryObj.maxSekKwh * VAT_MULTIPLIER : summaryObj.maxSekKwh
+}
+
+function getDisplayPreviousAvg() {
+  const prev = getPreviousSummary()
+  return prev ? getDisplayAvg(prev) : null
+}
 
 function getPreviousSummary() {
   switch (selectedDay.value) {
@@ -252,9 +370,9 @@ function getSelectedDateLabel() {
 }
 
 function getCurrentPriceClass() {
-  if (!currentPrice.value || !avgPrice.value) return ''
-  if (currentPrice.value < avgPrice.value * 0.9) return 'low'
-  if (currentPrice.value > avgPrice.value * 1.1) return 'high'
+  if (!displayCurrentPrice.value || !displayAvgPrice.value) return ''
+  if (displayCurrentPrice.value < displayAvgPrice.value * 0.9) return 'low'
+  if (displayCurrentPrice.value > displayAvgPrice.value * 1.1) return 'high'
   return 'normal'
 }
 
@@ -263,15 +381,12 @@ function getBarHeight(price) {
   return (price / maxPrice.value) * 100
 }
 
-function getBarClass(price, timestamp) {
-  const now = new Date()
-  const priceTime = new Date(timestamp)
-  const isCurrentHour = priceTime.getHours() === now.getHours() &&
-      priceTime.getDate() === now.getDate() &&
-      selectedDay.value === 'today'
+function getBarClass(price, hour) {
+  const currentH = new Date().getHours().toString().padStart(2, '0')
+  const isCurrentHour = hour === currentH && selectedDay.value === 'today'
 
   let cls = ''
-  const avg = currentSummary.value?.averageSekKwhInclVat || avgPrice.value
+  const avg = displaySummaryAvg.value || displayAvgPrice.value
   if (price < avg * 0.8) cls = 'low'
   else if (price > avg * 1.2) cls = 'high'
   else cls = 'normal'
@@ -288,6 +403,15 @@ function getCompareText(current, previous) {
   return '→ 0%'
 }
 
+function formatPercent(current, avg) {
+  const diff = Math.abs(((current - avg) / avg) * 100)
+  return `${diff.toFixed(0)}%`
+}
+
+function formatDiff(diff) {
+  return `${(diff * 100).toFixed(1)} öre`
+}
+
 function formatPrice(price) {
   return price?.toFixed(2) || '—'
 }
@@ -297,17 +421,24 @@ function formatDate(date) {
 }
 
 function formatTime(timestamp) {
-  return new Date(timestamp).toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' })
-}
-
-function formatHour(timestamp) {
-  return new Date(timestamp).toLocaleTimeString('sv-SE', { hour: '2-digit' })
+  return timestamp.substring(11, 16)
 }
 
 function getDateOffset(offset) {
   const d = new Date()
   d.setDate(d.getDate() + offset)
   return d.toISOString().split('T')[0]
+}
+
+const safeJson = async (res) => {
+  if (!res.ok) return null
+  const text = await res.text()
+  if (!text) return null
+  try {
+    return JSON.parse(text)
+  } catch {
+    return null
+  }
 }
 
 onMounted(async () => {
@@ -324,44 +455,31 @@ onMounted(async () => {
       fetch(`${API_URL}/api/analysis/date/${getDateOffset(1)}`)
     ]
 
-    const [
-      summaryRes, pricesRes, rateRes,
-      yesterdaySummaryRes, yesterdayPricesRes,
-      dayBeforeYesterdaySummaryRes, dayBeforeYesterdayPricesRes,
-      tomorrowSummaryRes, tomorrowPricesRes
-    ] = await Promise.all(requests)
+    const responses = await Promise.all(requests)
 
-    summary.value = await summaryRes.json()
-    prices.value = await pricesRes.json()
-    const rateData = await rateRes.json()
-    exchangeRate.value = rateData.rate?.toFixed(2)
+    summary.value = await safeJson(responses[0])
+    prices.value = await safeJson(responses[1]) || []
+    const rateData = await safeJson(responses[2])
+    exchangeRate.value = rateData?.rate?.toFixed(2)
 
-    if (yesterdaySummaryRes.ok) {
-      const data = await yesterdaySummaryRes.json()
-      if (data?.date) yesterdaySummary.value = data
-    }
-    if (yesterdayPricesRes.ok) {
-      const data = await yesterdayPricesRes.json()
-      if (data?.length > 0) yesterdayPrices.value = data
-    }
+    const yesterdaySum = await safeJson(responses[3])
+    if (yesterdaySum?.date) yesterdaySummary.value = yesterdaySum
 
-    if (dayBeforeYesterdaySummaryRes.ok) {
-      const data = await dayBeforeYesterdaySummaryRes.json()
-      if (data?.date) dayBeforeYesterdaySummary.value = data
-    }
-    if (dayBeforeYesterdayPricesRes.ok) {
-      const data = await dayBeforeYesterdayPricesRes.json()
-      if (data?.length > 0) dayBeforeYesterdayPrices.value = data
-    }
+    const yesterdayPrc = await safeJson(responses[4])
+    if (yesterdayPrc?.length > 0) yesterdayPrices.value = yesterdayPrc
 
-    if (tomorrowSummaryRes.ok) {
-      const data = await tomorrowSummaryRes.json()
-      if (data?.date) tomorrowSummary.value = data
-    }
-    if (tomorrowPricesRes.ok) {
-      const data = await tomorrowPricesRes.json()
-      if (data?.length > 0) tomorrowPrices.value = data
-    }
+    const dayBeforeSum = await safeJson(responses[5])
+    if (dayBeforeSum?.date) dayBeforeYesterdaySummary.value = dayBeforeSum
+
+    const dayBeforePrc = await safeJson(responses[6])
+    if (dayBeforePrc?.length > 0) dayBeforeYesterdayPrices.value = dayBeforePrc
+
+    const tomorrowSum = await safeJson(responses[7])
+    if (tomorrowSum?.date) tomorrowSummary.value = tomorrowSum
+
+    const tomorrowPrc = await safeJson(responses[8])
+    if (tomorrowPrc?.length > 0) tomorrowPrices.value = tomorrowPrc
+
   } catch (e) {
     console.error('Failed to fetch data:', e)
   } finally {
@@ -392,7 +510,7 @@ body {
 
 header {
   text-align: center;
-  margin-bottom: 2rem;
+  margin-bottom: 1.5rem;
 }
 
 header h1 {
@@ -411,8 +529,36 @@ header h1 {
   color: #888;
 }
 
+.vat-toggle {
+  display: flex;
+  justify-content: center;
+  gap: 0.5rem;
+  margin-bottom: 1.5rem;
+}
+
+.vat-toggle button {
+  padding: 0.5rem 1rem;
+  border: 1px solid rgba(255,255,255,0.2);
+  background: rgba(255,255,255,0.05);
+  color: #888;
+  border-radius: 20px;
+  cursor: pointer;
+  transition: all 0.2s;
+  font-size: 0.85rem;
+}
+
+.vat-toggle button:hover {
+  background: rgba(255,255,255,0.1);
+}
+
+.vat-toggle button.active {
+  background: rgba(255,215,0,0.2);
+  border-color: #ffd700;
+  color: #ffd700;
+}
+
 .current-price-section {
-  margin-bottom: 2rem;
+  margin-bottom: 1.5rem;
 }
 
 .current-price-card {
@@ -447,11 +593,16 @@ header h1 {
   margin-top: 0.25rem;
 }
 
-.current-price-card .comparison {
+.current-price-card .comparison,
+.current-price-card .forecast-comparison {
   display: block;
-  margin-top: 1rem;
+  margin-top: 0.75rem;
   font-size: 0.9rem;
 }
+
+.current-price-card .under { color: #4ade80; }
+.current-price-card .over { color: #f87171; }
+.current-price-card .normal { color: #ffd700; }
 
 .day-tabs {
   display: flex;
@@ -598,20 +749,23 @@ header h1 {
   display: flex;
   align-items: flex-end;
   height: 200px;
-  gap: 2px;
+  gap: 3px;
+  padding-bottom: 25px;
 }
 
 .bar {
   flex: 1;
   background: #ffd700;
-  border-radius: 2px 2px 0 0;
+  border-radius: 3px 3px 0 0;
   position: relative;
   min-height: 4px;
-  transition: opacity 0.2s;
+  transition: all 0.2s;
+  cursor: pointer;
 }
 
 .bar:hover {
   opacity: 0.8;
+  transform: scaleY(1.02);
 }
 
 .bar.low { background: #4ade80; }
@@ -625,10 +779,10 @@ header h1 {
 
 .bar-label {
   position: absolute;
-  bottom: -20px;
+  bottom: -22px;
   left: 50%;
   transform: translateX(-50%);
-  font-size: 0.7rem;
+  font-size: 0.6rem;
   color: #666;
 }
 
@@ -705,6 +859,10 @@ header h1 {
 
   .day-tabs button {
     flex: 1 1 45%;
+  }
+
+  .bar-label {
+    font-size: 0.5rem;
   }
 }
 </style>
