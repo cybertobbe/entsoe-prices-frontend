@@ -73,7 +73,7 @@
             @click="selectedDay = 'tomorrow'"
             :disabled="!hasTomorrowPrices"
         >
-          Imorgon {{ !hasTomorrowPrices ? '(ej publ.)' : '' }}
+          Imorgon {{ !hasTomorrowPrices ? '(publ kl 13.15)' : '' }}
         </button>
       </div>
 
